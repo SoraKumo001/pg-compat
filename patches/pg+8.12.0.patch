@@ -1,0 +1,122 @@
+diff --git a/node_modules/pg/lib/crypto/utils-webcrypto.js b/node_modules/pg/lib/crypto/utils-webcrypto.js
+index 0433f01..94add83 100644
+--- a/node_modules/pg/lib/crypto/utils-webcrypto.js
++++ b/node_modules/pg/lib/crypto/utils-webcrypto.js
+@@ -13,7 +13,7 @@ module.exports = {
+  * The Web Crypto API - grabbed from the Node.js library or the global
+  * @type Crypto
+  */
+-const webCrypto = nodeCrypto.webcrypto || globalThis.crypto
++const webCrypto = globalThis.crypto ?? nodeCrypto.webcrypto 
+ /**
+  * The SubtleCrypto API for low level crypto operations.
+  * @type SubtleCrypto
+diff --git a/node_modules/pg/lib/stream.js b/node_modules/pg/lib/stream.js
+index 67b1b3c..eb0fa65 100644
+--- a/node_modules/pg/lib/stream.js
++++ b/node_modules/pg/lib/stream.js
+@@ -1,28 +1,85 @@
++const { getStream, getSecureStream } = getStreamFuncs();
++
++module.exports = {
++  /**
++   * Get a socket stream compatible with the current runtime environment.
++   * @returns {Duplex}
++   */
++  getStream,
++  /**
++   * Get a TLS secured socket, compatible with the current environment,
++   * using the socket and other settings given in `options`.
++   * @returns {Duplex}
++   */
++  getSecureStream,
++};
++
+ /**
+- * Get a socket stream compatible with the current runtime environment.
+- * @returns {Duplex}
++ * The stream functions that work in Node.js
+  */
+-module.exports.getStream = function getStream(ssl) {
+-  const net = require('net')
+-  if (typeof net.Socket === 'function') {
+-    return new net.Socket()
+-  } else {
+-    const { CloudflareSocket } = require('pg-cloudflare')
+-    return new CloudflareSocket(ssl)
++function getNodejsStreamFuncs() {
++  function getStream(_ssl) {
++    const net = require("net");
++    return new net.Socket();
++  }
++
++  function getSecureStream(options) {
++    var tls = require("tls");
++    return tls.connect(options);
+   }
++  return {
++    getStream,
++    getSecureStream,
++  };
+ }
+ 
+ /**
+- * Get a TLS secured socket, compatible with the current environment,
+- * using the socket and other settings given in `options`.
+- * @returns {Duplex}
++ * The stream functions that work in Cloudflare Workers
+  */
+-module.exports.getSecureStream = function getSecureStream(options) {
+-  var tls = require('tls')
+-  if (tls.connect) {
+-    return tls.connect(options)
+-  } else {
+-    options.socket.startTls(options)
+-    return options.socket
++function getCloudflareStreamFuncs() {
++  function getStream(ssl) {
++    const { CloudflareSocket } = require("pg-cloudflare");
++    return new CloudflareSocket(ssl);
++  }
++
++  function getSecureStream(options) {
++    options.socket.startTls(options);
++    return options.socket;
++  }
++  return {
++    getStream,
++    getSecureStream,
++  };
++}
++
++/**
++ * Are we running in a Cloudflare Worker?
++ *
++ * @returns true if the code is currently running inside a Cloudflare Worker.
++ */
++function isCloudflareRuntime() {
++  // Since 2022-03-21 the `global_navigator` compatibility flag is on for Cloudflare Workers
++  // which means that `navigator.userAgent` will be defined.
++  if (
++    typeof navigator === "object" &&
++    navigator !== null &&
++    typeof navigator.userAgent === "string"
++  ) {
++    return navigator.userAgent === "Cloudflare-Workers";
++  }
++  // In case `navigator` or `navigator.userAgent` is not defined then try a more sneaky approach
++  if (typeof Response === "function") {
++    const resp = new Response(null, { cf: { thing: true } });
++    if (typeof resp.cf === "object" && resp.cf !== null && resp.cf.thing) {
++      return true;
++    }
++  }
++  return false;
++}
++
++function getStreamFuncs() {
++  if (isCloudflareRuntime()) {
++    return getCloudflareStreamFuncs();
+   }
++  return getNodejsStreamFuncs();
+ }
